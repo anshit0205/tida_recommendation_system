@@ -85,7 +85,7 @@ Create a `data/` folder at the project root and add the following JSON files. Th
 Start the API locally with:
 
 ```bash
-python main.py
+python script.py
 # or
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
