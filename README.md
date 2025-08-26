@@ -47,7 +47,7 @@ Recommendations are location-aware and support either Haversine (direct) distanc
 ## Features
 
 * Smart distance calculation: Haversine or ORS routing (real-world travel distance/time).
-* Sport matching: recognizes 20+ sports and many common variations (case-insensitive).
+* Sport matching: recognizes 20 sports and many common variations (case-insensitive).
 * Location-based sorting and filtering.
 * Purchase-history-aware recommendations (no duplicates).
 * Flexible input formats for `preferred_sports`.
