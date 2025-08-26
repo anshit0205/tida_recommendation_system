@@ -1,1 +1,7 @@
- 
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pandas==2.1.3
+numpy==1.25.2
+requests==2.31.0
+phpserialize==1.3
+pydantic==2.5.0 
