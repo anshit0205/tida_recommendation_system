@@ -52,7 +52,7 @@ Recommendations are location-aware and support either Haversine (direct) distanc
 * Purchase-history-aware recommendations (no duplicates).
 * Flexible input formats for `preferred_sports`.
 * Batch ORS requests and automatic ORS fallback to Haversine when ORS fails.
-* Excludes renewal/testing/draft packages by default.
+
 
 ---
 
@@ -87,7 +87,7 @@ Start the API locally with:
 ```bash
 python script.py
 # or
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn script:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Open interactive docs at: `http://localhost:8000/docs`
@@ -263,8 +263,6 @@ Common profiles supported by ORS (use `ors_profile` in requests):
 1. Sign up at [https://openrouteservice.org/](https://openrouteservice.org/)
 2. Generate an API key in your dashboard
 3. Free tier: \~200 requests/day (check ORS for exact limits)
-
-**Security note:** Never hard-code API keys in public repositories. Provide keys with environment variables or secure vaults.
 
 ### Using ORS in Requests
 
