@@ -1,385 +1,327 @@
-# Tida Sports Recommendation API
+#  Sports Recommendation API
 
-> FastAPI-based recommendation system for sports academy packages. Suggests relevant academy packages based on customer purchase history or new customer preferences and sorts them by distance.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Quick Start](#quick-start)
-
-   * [Installation](#installation)
-   * [Data Setup](#data-setup)
-   * [Run the API](#run-the-api)
-4. [API Endpoints](#api-endpoints)
-
-   * [Health Check](#health-check)
-   * [Load Data](#load-data)
-   * [Recommend - Existing Customer](#recommend-for-existing-customer)
-   * [Recommend - New Customer](#recommend-for-new-customer)
-   * [Other Endpoints](#other-endpoints)
-5. [OpenRouteService (ORS) Integration](#openrouteservice-ors-integration)
-
-   * [ORS Routing Profiles](#ors-routing-profiles)
-   * [Using ORS in Requests](#using-ors-in-requests)
-6. [Supported Sports](#supported-sports)
-7. [Response Format](#response-format)
-8. [Configuration & Filtering Logic](#configuration--filtering-logic)
-9. [Technical Notes](#technical-notes)
-10. [Common Issues & Troubleshooting](#common-issues--troubleshooting)
-11. [Production Considerations](#production-considerations)
+A sophisticated intelligent recommendation system for sports academies that provides **personalized recommendations** based on user history, preferences, location, and budget analysis.
 
 ---
 
-## Overview
+##  Features
 
-This project provides a lightweight REST API (FastAPI) that recommends sports academy packages to users. It supports two main recommendation flows:
-
-* **Existing customers** — find packages similar to what they already purchased and nearby academies; excludes packages already purchased by that customer.
-* **New customers** — find packages that match user preferred sports, sorted by distance to the user's supplied coordinates.
-
-Recommendations are location-aware and support either Haversine (direct) distance or real-world routing distances via OpenRouteService (ORS).
-
----
-
-## Features
-
-* Smart distance calculation: Haversine or ORS routing (real-world travel distance/time).
-* Sport matching: recognizes 20 sports and many common variations (case-insensitive).
-* Location-based sorting and filtering.
-* Purchase-history-aware recommendations (no duplicates).
-* Flexible input formats for `preferred_sports`.
-* Batch ORS requests and automatic ORS fallback to Haversine when ORS fails.
-
+- **Comprehensive User Analysis** — detailed analysis of user spending patterns, sports preferences, and historical behavior  
+- **Smart Budget Inference** — automatically calculates an intelligent budget from purchase history with clear reasoning  
+- **Dynamic Scoring System** — multi-factor scoring with adaptive thresholds and explainable outputs  
+- **Location Intelligence** — distance-based recommendations with travel-pattern insights  
+- **Sports Canonicalization** — maps sport name variants (e.g., "football" ↔ "soccer") for robust matching  
+- **Skill Level Matching** — recommendations based on user's skill progression and academy fit  
+- **Amenities Filtering** — preference-based amenity matching and parsing
 
 ---
 
-## Quick Start
+##  Scoring System Architecture
 
-### Installation
-
-```bash
-pip install fastapi uvicorn pandas numpy requests phpserialize
-```
-
-> Python 3.8+ recommended.
-
-### Data Setup
-
-Create a `data/` folder at the project root and add the following JSON files. These files are used by the API to serve recommendations and must be loaded via `/load-data` (or automatically at startup if the project is configured that way).
-
-* `post.json` — Academy package information (post metadata, title, content, status, price, etc.)
-* `post_meta.json` — Package metadata including latitude/longitude, sports tags, canonical sport names, and other custom fields
-* `order_addresses.json` — Customer addresses (latitude/longitude per order/customer)
-* `order_product_lookup.json` — Purchase history linking customers (or orders) to package IDs
-* `customer_lookup.json` — Customer information and username lookup
-
-**Recommended placement:** `./data/post.json`, `./data/post_meta.json`, `./data/order_addresses.json`, `./data/order_product_lookup.json`, `./data/customer_lookup.json`.
-
-**Note:** The `POST /load-data` endpoint accepts a `data_dir` query parameter (default: `data`) to point to a different folder.
-
-### Run the API
-
-Start the API locally with:
-
-```bash
-python script.py
-# or
-uvicorn script:app --reload --host 0.0.0.0 --port 8000
-```
-
-Open interactive docs at: `http://localhost:8000/docs`
-
----
-
-## API Endpoints
-
-> All recommendation endpoints return a JSON response with the following top-level keys: `status`, `message`, `count`, `data`, `distance_range`.
-
-### Health Check
-
-```
-GET /health
-```
-
-Returns a small JSON indicating the API is running and whether data is loaded.
-
-**Example response:**
-
-```json
-{ "status": "success", "message": "OK", "data_loaded": true }
-```
-
----
-
-### Load Data
-
-```
-POST /load-data?data_dir=data
-```
-
-Loads JSON files from the given directory into memory. Use this if you updated files on disk and want the API to reload them without restarting.
-
----
-
-### Recommend for Existing Customer
-
-```
-POST /recommend/existing-customer
-```
-
-**Request Body:**
-
-```json
-{
-  "username": "john_doe",
-  "max_distance_km": 10.0,
-  "use_ors": false,
-  "ors_api_key": null,
-  "ors_profile": "driving-car"
-}
-```
-
-**Behavior:**
-
-* Looks up the customer by `username` (case-insensitive) in `customer_lookup.json`.
-* Finds package(s) the customer previously purchased using `order_product_lookup.json` and `order_addresses.json` to obtain customer location(s).
-* Finds nearby packages (within `max_distance_km`) that **match the same sport(s)** as previously purchased packages.
-* Excludes packages the customer already purchased and excludes draft/test posts.
-* Sorts results by distance (Haversine or ORS, depending on `use_ors`).
-
-**Example (Python):**
+### Default Weights
 
 ```python
-import requests
-resp = requests.post("http://localhost:8000/recommend/existing-customer", json={
-    "username": "jane_smith",
-    "max_distance_km": 15.0,
-    "use_ors": True,
-    "ors_api_key": "YOUR_ORS_API_KEY",
-    "ors_profile": "driving-car"
-})
-print(resp.json())
-```
-
----
-
-### Recommend for New Customer
-
-```
-POST /recommend/new-customer
-```
-
-**Request Body (examples accepted):**
-
-```json
-{
-  "user_lat": 28.6139,
-  "user_lon": 77.2090,
-  "preferred_sports": ["football", "cricket"],
-  "use_ors": false,
-  "ors_api_key": null,
-  "ors_profile": "driving-car"
+weights = {
+    'amenities': 0.10,    # 10% - user preferred amenities match
+    'distance': 0.50,     # 50% - geographic proximity
+    'skill_level': 0.15,  # 15% - skill level compatibility
+    'budget': 0.25        # 25% - price vs smart budget fit
 }
 ```
 
-or
+### Total Score
+
+```
+Total Score = (Amenities_Score × 0.10 + Distance_Score × 0.50 + Skill_Score × 0.15 + Budget_Score × 0.25) × 100
+```
+
+### Individual Scoring Components
+
+#### 1. Distance Scoring (50% weight)
+
+Dynamic thresholds (based on population distribution of candidate distances):
+
+- **Excellent (90–100%)**: ≤ 25th percentile OR ≤ 8 km
+- **Good (70–89%)**: ≤ median OR ≤ 20 km  
+- **Acceptable (40–69%)**: ≤ 75th percentile OR ≤ 40 km
+- **Poor (15–39%)**: ≤ 85th percentile OR ≤ 60 km
+- **Very Poor (1–14%)**: exponential decay beyond poor threshold
+
+> **Note**: Percentile-based thresholds adapt to number and spread of available academies.
+
+#### 2. Budget Scoring (25% weight)
+
+Based on the smart budget inferred from purchase history:
+
+- **Perfect (100%)**: price ≤ 40% of smart budget
+- **Excellent (90–99%)**: 40% < price ≤ 70% of smart budget
+- **Good (80–89%)**: 70% < price ≤ 100% of smart budget
+- **Acceptable (60%)**: 100% < price ≤ 110% of smart budget
+- **Moderate (40%)**: 110% < price ≤ 125% of smart budget
+- **Poor (20%)**: 125% < price ≤ 150% of smart budget
+- **Very Poor (1–19%)**: exponential decay beyond 150%
+
+#### 3. Skill Level Scoring (15% weight)
+
+Skill levels: **Beginner (1)** → **Intermediate (2)** → **Advanced (3)** → **Professional (4)**
+
+- **Perfect Match (100%)**: exact skill-level match
+- **Good Match (30%)**: adjacent level (±1)
+- **Poor Match (10%)**: non-adjacent levels
+
+#### 4. Amenities Scoring (10% weight)
+
+- **Perfect (100%)**: all requested amenities available
+- **Partial**: proportional to matched percentage
+- **None (0%)**: no requested amenities found
+- **No Preference (100%)**: when `["none"]` is provided
+- **Default (50%)**: when amenities parameter is omitted
+
+---
+
+##  Smart Budget System
+
+### Budget Inference Logic
+
+1. **Base Calculation**: `calculated_budget = max_historical_price × 1.25`
+2. **Variance Analysis**: adjust according to spending coefficient of variation (CV)
+    CV= mean / std dev 
+4. **Safety Bounds**:
+   ```
+   smart_budget = min(max_price × 2.0, max(avg_price × 1.1, calculated_budget))
+   ```
+
+### Budget Growth by CV
+
+- **Consistent Spender (CV < 0.3)**: growth factor = 1.15 → `max_price × 1.15`
+- **Moderate Variance (0.3 ≤ CV ≤ 0.7)**: growth factor = 1.25 → `max_price × 1.25`  
+- **Experimental Spender (CV > 0.7)**: growth factor = 1.40 → `max_price × 1.40`
+
+**Example Reasoning Text** (for responses):
+> "Moderate variance (CV: 0.45) — standard 25% increase applied to maximum historical price."
+
+---
+
+##  API Endpoints
+
+### `POST /recommendations`
+
+**Request parameters** (JSON):
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `username` | string |  Username or customer ID |
+| `user_lat` | float | User latitude (-90 to 90) |
+| `user_lon` | float |  User longitude (-180 to 180) |
+| `preferred_amenities` | array | List of preferred amenities (e.g., `["parking","wifi"]`) |
+| `skill_level` | string |  One of: `"Beginner"`,`"Intermediate"`,`"Advanced"`,`"Professional"` |
+| `target_sports` | array | Filter for specific sports (e.g., `["football","tennis"]`) |
+
+**Additional Notes**:
+- **Amenities Parsing**: accepts separators `;` `,` `/` `|` `&` and (case-insensitive).
+- **Sports Canonicalization**: maps common variants to canonical sport names (case-insensitive).
+
+### `GET /health`
+Returns simple health & data-load status.
+
+### `GET /stats` 
+Returns API usage statistics and available option lists.
+
+### `GET /`
+API overview & documentation pointer.
+
+---
+
+## 📋 Example Response
 
 ```json
 {
-  "user_lat": 28.6139,
-  "user_lon": 77.2090,
-  "preferred_sports": "football, swimming",
-  "use_ors": false
-}
-```
-
-**Behavior:**
-
-* Accepts `preferred_sports` as a list or comma-separated string. Matching is case-insensitive and supports synonyms (e.g., `soccer` → `football`).
-* Finds **all** packages that match any preferred sport, sorts them by distance from (`user_lat`, `user_lon`) using Haversine or ORS routing.
-
-**Example (Python):**
-
-```python
-import requests
-resp = requests.post("http://localhost:8000/recommend/new-customer", json={
-    "user_lat": 28.6139,
-    "user_lon": 77.2090,
-    "preferred_sports": "football, swimming",
-    "use_ors": False
-})
-for rec in resp.json()["data"][:5]:
-    print(rec["post_title"], rec["distance_km"])
-```
-
----
-
-### Other Endpoints
-
-* `GET /sports/canonical` — List all supported canonical sport names and common variations.
-* `GET /customers/search?username=john` — Search customers (fuzzy/case-insensitive match).
-* `GET /packages/count` — Get a total count of packages currently loaded.
-
----
-
-## OpenRouteService (ORS) Integration
-
-### What is ORS?
-
-OpenRouteService (ORS) provides real-world routing distances and travel times using road networks. It is more accurate than straight-line (Haversine) distance because it accounts for roads, transport mode, and routing constraints.
-
-### ORS Routing Profiles
-
-Common profiles supported by ORS (use `ors_profile` in requests):
-
-**Driving:**
-
-* `driving-car` (default)
-* `driving-hgv`
-
-**Walking / Foot:**
-
-* `foot-walking`
-* `foot-hiking`
-
-**Cycling:**
-
-* `cycling-regular`
-* `cycling-road`
-* `cycling-mountain`
-* `cycling-electric`
-
-**Public Transport:**
-
-* `public-transport`
-
-> Choose the profile that best matches how your customers will travel to the academy.
-
-### Getting an ORS API Key
-
-1. Sign up at [https://openrouteservice.org/](https://openrouteservice.org/)
-2. Generate an API key in your dashboard
-3. Free tier: \~200 requests/day (check ORS for exact limits)
-
-### Using ORS in Requests
-
-Add `use_ors: true` and `ors_api_key: "YOUR_KEY"` to your request body to use ORS routing. Set `ors_profile` to change transport mode. The API batches ORS lookups and falls back to Haversine if ORS fails.
-
----
-
-## Supported Sports
-
-The API recognizes the following canonical sports and common variations (matching is case-insensitive):
-
-* **Football** — soccer, football
-* **Cricket** — cricket, cricketing
-* **Basketball** — basketball
-* **Swimming** — swimming, swim, water
-* **Horse Riding** — horse riding, equestrian, horse-riding
-* **Tennis** — lawn tennis, tennis, YMCA
-* **Badminton** — badminton
-* **Skating** — skating, ice skating, roller skating
-* **Dance** — dance, dancing
-* **Music** — music, vocal, instrument
-* **Taekwondo** — taekwondo, tae kwon do, tkd
-* **Acting** — acting, drama, theatre, theater
-* **Languages** — language, spoken English, language classes
-* **Public Speaking** — public speaking, communication, debate
-* **Martial Arts** — martial arts, MMA, karate, judo, kung fu, aikido, kickboxing
-* **Yoga** — yoga, meditation, pranayama
-* **Padel** — padel, paddle tennis
-* **Pickleball** — pickleball, pickle ball
-* **Roller Hockey** — roller hockey, roller-hockey
-* **Boxing** — boxing, kick boxing, kickboxing
-
-> The canonical list is accessible via `GET /sports/canonical`.
-
----
-
-## Response Format
-
-All recommendation endpoints return a structure similar to this:
-
-```json
-{
-  "status": "success",
-  "message": "Found 15 recommendations",
-  "count": 15,
-  "data": [
+  "user_analysis": {
+    "customer_name": "John Doe",
+    "sports_history": ["football", "cricket"],
+    "purchase_count": 5,
+    "budget_insights": {
+      "smart_budget": 7500.0,
+      "reasoning": "Moderate variance (CV: 0.45) - standard 25% increase",
+      "historical_range": {
+        "min": 3000.0,
+        "max": 6000.0,
+        "avg": 4500.0,
+        "median": 4000.0
+      },
+      "spending_consistency": "Moderate",
+      "budget_growth_factor": 1.25
+    },
+    "location_analysis": {
+      "avg_distance": 15.2,
+      "travel_pattern": "Regional",
+      "preferred_areas": ["Academy A", "Academy B"]
+    },
+    "spending_pattern": "Consistent Spender"
+  },
+  "recommendations": [
     {
-      "ID": "123",
-      "post_title": "Football Academy Delhi",
-      "address": "Connaught Place, New Delhi",
-      "distance_km": 2.5,
-      "matched_sports": "football",
-      "latitude": 28.6139,
-      "longitude": 77.2090,
-      "_price": "5000"
+      "ID": 123,
+      "academy_name": "Elite Sports Academy",
+      "sports": ["football", "cricket"],
+      "skill_level": "Intermediate",
+      "price": 5000.0,
+      "distance_km": 8.5,
+      "total_score": 87.5,
+      "amenities_score": 80.0,
+      "distance_score": 92.0,
+      "skill_score": 100.0,
+      "budget_score": 90.0,
+      "recommendation_reason": "Great location & skill_match",
+      "budget_indicator": "Within Budget"
     }
   ],
-  "distance_range": { "min_km": 1.2, "max_km": 9.8 }
+  "summary_stats": {
+    "total_recommendations": 10,
+    "within_budget_count": 7,
+    "excellent_matches": 3,
+    "average_distance": 12.4
+  }
 }
 ```
 
 ---
 
-## Configuration & Filtering Logic
+## 🚀 Installation & Setup
 
-**Distance Calculation Options:**
+### Prerequisites
 
-* `haversine` (default): fast, straight-line distance.
-* `ors` (when `use_ors=true`): routing distance/time via ORS.
+- **Python 3.8+**
+- Required data files in a `data/` directory:
+  - `post.json`
+  - `post_meta.json`
+  - `order_addresses.json`
+  - `order_product_lookup.json`
+  - `customer_lookup.json`
 
-**Filtering rules:**
+### Quickstart
 
-* **Existing customers:** Search near previously purchased academy location(s), filter packages matching previously purchased sports, limit by `max_distance_km`, exclude previously purchased packages.
-* **New customers:** Find all packages that match preferred sports and sort by distance to the supplied coordinates.
+```bash
+# Clone repo
+git clone <repository-url>
+cd sports-recommendation-api
 
----
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
 
-## Technical Notes
+# Install dependencies
+pip install fastapi uvicorn pandas numpy phpserialize pydantic
 
-* Direct (Haversine) distance is calculated using the standard Haversine formula.
-* ORS requests are batched (up to 50 locations per batch) for efficiency.
-* Case-insensitive matching is used for usernames and sports.
-* The system handles common input formats for `preferred_sports` (list or CSV string).
-* The API gracefully falls back to Haversine if ORS calls fail or the API key is invalid.
+# Run local dev server
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
 
----
-
-## Common Issues & Troubleshooting
-
-**"Data not loaded"**
-
-* Call `POST /load-data?data_dir=data` or restart the API after placing JSON files in the `data/` folder.
-
-**Empty recommendations**
-
-* Confirm the `username` exists in `customer_lookup.json` (for existing-customer requests).
-* Ensure valid lat/lon coordinates in `post_meta.json` and `order_addresses.json`.
-* Verify `preferred_sports` values are among the supported sports or their variations.
-
-**ORS API errors**
-
-* Confirm your ORS API key and quotas.
-* Validate coordinate pairs are within valid ranges (lat: -90..90, lon: -180..180).
-* The API will automatically fall back to Haversine on ORS failure.
+**Access**:
+- API root → http://localhost:8000/
+- Swagger docs → http://localhost:8000/docs  
+- Health check → http://localhost:8000/health
 
 ---
 
-## Production Considerations
+## 🔧 Customization
 
-When moving to production, consider the following improvements:
+### Modify Scoring Weights
 
-* Replace in-memory JSON loading with a proper database (Postgres, ElasticSearch, etc.).
-* Add authentication and API keys for protected endpoints.
-* Add rate limiting and request throttling to protect ORS usage.
-* Implement caching of ORS responses (use a TTL) to reduce external calls and cost.
-* Add detailed request/response logging and structured logs for observability.
-* Add input validation (pydantic models) and sanitize incoming data.
-* Add CI/CD, containerization (Docker), and a deployment strategy (K8s, ECS, etc.).
+Edit the `weights` dict in `calculate_enhanced_scores`:
+
+```python
+weights = {
+    'amenities': 0.10,
+    'distance': 0.50,
+    'skill_level': 0.15,
+    'budget': 0.25
+}
+```
+
+**Guidelines**: weights must sum to 1.0. Typical ranges:
+- **Distance**: 0.4–0.6
+- **Budget**: 0.2–0.3  
+- **Amenities**: 0.05–0.20
+- **Skill**: 0.1–0.25
+
+### Modify Distance Thresholds
+
+Update `get_dynamic_distance_scores` thresholds if you prefer fixed km breakpoints:
+
+```python
+ excellent_threshold = min(q25_dist, 8.0)      # Change 8.0 to your desired max km for excellent
+ good_threshold = min(median_dist, 20.0)       # Change 20.0 to your desired max km for good
+ acceptable_threshold = min(q75_dist, 40.0)    # Change 40.0 to your desired max km for acceptable
+ poor_threshold = min(max_dist * 0.85, 60.0)   # Change 60.0 to your desired max km for poor
+```
 
 ---
+
+## 🔍 API Usage Examples
+
+### open terminal and run 
+
+```bash
+python main.py
+```
+After that go to http://localhost:8000/docs
+
+### Advanced Request
+
+```bash
+curl -X POST "http://localhost:8000/recommendations" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "user123",
+    "user_lat": 29.8543,
+    "user_lon": 77.8880,
+    "preferred_amenities": ["parking", "wifi", "swimming pool"],
+    "skill_level": "Advanced",
+    "target_sports": ["football", "tennis"]
+  }'
+```
+
+---
+
+## 📊 Data Requirements (Input Schema)
+
+- **`post.json`** — academy / package information (IDs, titles, descriptions)
+- **`post_meta.json`** — metadata (prices, coordinates, amenities, skill-level tags)  
+- **`order_addresses.json`** — customer addresses and coordinates
+- **`order_product_lookup.json`** — purchase history mapping (orders → products)
+- **`customer_lookup.json`** — customer ID ↔ username mapping
+
+> Ensure coordinates use decimal degrees and prices use a consistent currency/units.
+
+---
+
+## 🎮 Canonical Sports & Variants (case-insensitive)
+
+The API recognizes these canonical sports and common variations (used for matching and filtering):
+
+- **Football** — soccer, football
+- **Cricket** — cricket, cricketing  
+- **Basketball** — basketball
+- **Swimming** — swimming, swim, water
+- **Horse Riding** — horse riding, equestrian, horse-riding
+- **Tennis** — lawn tennis, tennis, YMCA
+- **Badminton** — badminton
+- **Skating** — skating, ice skating, roller skating
+- **Dance** — dance, dancing
+- **Music** — music, vocal, instrument
+- **Taekwondo** — taekwondo, tae kwon do, tkd
+- **Acting** — acting, drama, theatre, theater
+- **Languages** — language, spoken English, language classes
+- **Public Speaking** — public speaking, communication, debate
+- **Martial Arts** — martial arts, MMA, karate, judo, kung fu, aikido, kickboxing
+- **Yoga** — yoga, meditation, pranayama
+- **Padel** — padel, paddle tennis
+- **Pickleball** — pickleball, pickle ball
+- **Roller Hockey** — roller hockey, roller-hockey
+- **Boxing** — boxing, kick boxing, kickboxing
+
+---
+
+
+[Add contact information or support channels here]
